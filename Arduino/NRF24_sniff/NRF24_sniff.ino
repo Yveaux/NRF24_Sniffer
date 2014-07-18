@@ -20,34 +20,19 @@
  
 #include <Arduino.h>
 #include <SPI.h>
-#include <MyConfig.h>
-#include <MySensor.h>
 #include <CircularBuffer.h>
-#include "utility/RF24.h"
-#include "utility/RF24_config.h"
-
-// Define some default values when MySensors library is not used
-#ifndef RF24_CHANNEL
-#define RF24_CHANNEL    76
-#endif
-
-#ifndef RF24_DATARATE
-#define RF24_DATARATE   RF24_1MBPS
-#endif
-
-#ifndef BASE_RADIO_ID
-#define BASE_RADIO_ID ((uint64_t)0xA8A8E1FC00LL) 
-#endif
+#include <RF24.h>
+#include <RF24_config.h>
 
 // Set up nRF24L01 radio on SPI bus plus pins 9 & 10
 RF24 radio(9, 10);
 
-#define PIPE               (0)                                                      // Pipe number to use for listening
-
-#define RF_CHANNEL         (RF24_CHANNEL)                                           // Default channel for MySensors.
-#define RF_DATARATE        (RF24_DATARATE)
+#define RF_CHANNEL         (76)                                                     // 76 = Default channel for MySensors.
+#define RF_DATARATE        (RF24_1MBPS)                                             // Datarate
 #define RF_MAX_ADDR_WIDTH  (5)                                                      // Maximum address width, in bytes. MySensors use 5 bytes for addressing, where lowest byte is for node addressing.
 #define RF_ADDR_WIDTH      (RF_MAX_ADDR_WIDTH-1)                                    // We use all but the lowest address byte for promiscuous listening. First byte of data received will then be the node address.
+#define BASE_RADIO_ID      ((uint64_t)0xABCDABC000LL)                               // 0xABCDABC000LL = MySensors v1 (1.3) default
+//#define BASE_RADIO_ID      ((uint64_t)0xA8A8E1FC00LL)                             // 0xA8A8E1FC00LL = MySensors v2 (1.4) default
 #define RF_PROMISC_ADDR    ((BASE_RADIO_ID)>>((RF_MAX_ADDR_WIDTH-RF_ADDR_WIDTH)*8)) // Our 'promiscuous' node address. BASE_RADIO_ID = Base address for MySensors.
 #define RF_CRC_LENGTH      (2)                                                      // Length (in bytes) of NRF24 CRC
 #define RF_PAYLOAD_SIZE    (32)                                                     // Define NRF24 payload size to maximum, so we'll slurp as many bytes as possible from the packet.
@@ -55,6 +40,8 @@ RF24 radio(9, 10);
 #define RF_IRQ_PIN         (2)
 #define RF_IRQ             (RF_IRQ_PIN-2)                                           // Usually the interrupt = pin -2 (on uno/nano anyway)
 #define PACKET_BUFFER_SIZE (30)                                                     // Maximum number of packets that can be buffered between reception by NRF and transmission over serial port.
+
+#define PIPE               (0)                                                      // Pipe number to use for listening
 
 // If BINARY_OUTPUT is defined, this sketch will output in hex format to the PC.
 // If undefined it will output text output for development.
