@@ -14,16 +14,8 @@
 *.a
 *.lib
 
-# Visual Studio
-*.ipch
-*.sdf
-*.suo
-*.user
-*.log
-Debug
-Release
-
 # Executables
+*.exe
 *.out
 *.app
 
