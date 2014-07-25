@@ -24,19 +24,32 @@ typedef struct _NRF24_packet_t
 {
   uint32_t timestamp;
   uint8_t  packetsLost;
-  uint8_t  packet[RF_PAYLOAD_SIZE];
+  uint8_t  packet[MAX_RF_PAYLOAD_SIZE];
 } NRF24_packet_t;
-
-inline uint8_t getPayloadLen(NRF24_packet_t* p)
-{
-  return (p->packet[RF_MAX_ADDR_WIDTH-RF_ADDR_WIDTH] & 0xFC) >> 2; 
-}
 
 typedef struct _Serial_header_t
 {
   uint32_t timestamp;
   uint8_t  packetsLost;
-  uint8_t  address[RF_ADDR_WIDTH];    // Lowest RF_MAX_ADDR_WIDTH-RF_ADDR_WIDTH byte(s) come first in data.
+  uint8_t  address[RF_MAX_ADDR_WIDTH];    // MSB first, always RF_MAX_ADDR_WIDTH bytes.
 } Serial_header_t;
+
+typedef struct _Serial_config_t
+{
+  uint8_t channel;
+  uint8_t rate;                        // rf24_datarate_e: 0 = 1Mb/s, 1 = 2Mb/s, 2 = 250Kb/s
+  uint8_t addressLen;                  // Number of bytes used in address, range [2..5]
+  uint8_t addressPromiscLen;           // Number of bytes used in promiscuous address, range [2..5]. E.g. addressLen=5, addressPromiscLen=4 => 1 byte unique identifier.
+  uint64_t address;                    // Base address, LSB first.
+  uint8_t crcLength;                   // Length of active CRC, range [0..2]
+  uint8_t maxPayloadSize;              // Maximum size of payload for nRF (including nRF header), range[4?..32]
+} Serial_config_t;
+
+#define MSG_TYPE_PACKET  (0)
+#define MSG_TYPE_CONFIG  (1)
+
+#define SET_MSG_TYPE(var,type)   (((var) & 0x3F) | ((type) << 6))
+#define GET_MSG_TYPE(var)        ((var) >> 6)
+#define GET_MSG_LEN(var)         ((var) & 0x3F)
 
 #endif // NRF24_sniff_types_h

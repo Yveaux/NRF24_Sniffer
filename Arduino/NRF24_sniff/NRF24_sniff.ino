@@ -24,42 +24,39 @@
 #include <RF24.h>
 #include <RF24_config.h>
 
-// Set up nRF24L01 radio on SPI bus plus pins 9 & 10
-RF24 radio(9, 10);
+// Hardware configuration
+#define RF_CE_PIN                      (9)
+#define RF_CS_PIN                      (10)
+#define RF_IRQ_PIN                     (2)
+#define RF_IRQ                         (RF_IRQ_PIN-2)                                           // Usually the interrupt = pin -2 (on uno/nano anyway)
 
-#define RF_CHANNEL         (76)                                                     // 76 = Default channel for MySensors.
-#define RF_DATARATE        (RF24_1MBPS)                                             // Datarate
-#define RF_MAX_ADDR_WIDTH  (5)                                                      // Maximum address width, in bytes. MySensors use 5 bytes for addressing, where lowest byte is for node addressing.
-#define RF_ADDR_WIDTH      (RF_MAX_ADDR_WIDTH-1)                                    // We use all but the lowest address byte for promiscuous listening. First byte of data received will then be the node address.
-#define BASE_RADIO_ID      ((uint64_t)0xABCDABC000LL)                               // 0xABCDABC000LL = MySensors v1 (1.3) default
-//#define BASE_RADIO_ID      ((uint64_t)0xA8A8E1FC00LL)                             // 0xA8A8E1FC00LL = MySensors v2 (1.4) default
-#define RF_PROMISC_ADDR    ((BASE_RADIO_ID)>>((RF_MAX_ADDR_WIDTH-RF_ADDR_WIDTH)*8)) // Our 'promiscuous' node address. BASE_RADIO_ID = Base address for MySensors.
-#define RF_CRC_LENGTH      (2)                                                      // Length (in bytes) of NRF24 CRC
-#define RF_PAYLOAD_SIZE    (32)                                                     // Define NRF24 payload size to maximum, so we'll slurp as many bytes as possible from the packet.
-#define SER_BAUDRATE       (115200)
-#define RF_IRQ_PIN         (2)
-#define RF_IRQ             (RF_IRQ_PIN-2)                                           // Usually the interrupt = pin -2 (on uno/nano anyway)
-#define PACKET_BUFFER_SIZE (30)                                                     // Maximum number of packets that can be buffered between reception by NRF and transmission over serial port.
 
-#define PIPE               (0)                                                      // Pipe number to use for listening
+#define RF_MAX_ADDR_WIDTH              (5)                                                      // Maximum address width, in bytes. MySensors use 5 bytes for addressing, where lowest byte is for node addressing.
+/*delete*/#define RF_PROMISC_ADDR      ((BASE_RADIO_ID)>>((RF_MAX_ADDR_WIDTH-RF_ADDR_WIDTH)*8)) // Our 'promiscuous' node address. BASE_RADIO_ID = Base address for MySensors.
+#define MAX_RF_PAYLOAD_SIZE            (32)
+#define SER_BAUDRATE                   (115200)
+#define PACKET_BUFFER_SIZE             (30)                                                     // Maximum number of packets that can be buffered between reception by NRF and transmission over serial port.
+#define PIPE                           (0)                                                      // Pipe number to use for listening
+
+
+// Startup defaults until user reconfigures it
+#define DEFAULT_RF_CHANNEL             (76)                                                     // 76 = Default channel for MySensors.
+#define DEFAULT_RF_DATARATE            (RF24_1MBPS)                                             // Datarate
+#define DEFAULT_RF_ADDR_WIDTH          (RF_MAX_ADDR_WIDTH)                                    // We use all but the lowest address byte for promiscuous listening. First byte of data received will then be the node address.
+#define DEFAULT_RF_ADDR_PROMISC_WIDTH  (DEFAULT_RF_ADDR_WIDTH-1)
+//#define DEFAULT_RADIO_ID               ((uint64_t)0xABCDABC000LL)                               // 0xABCDABC000LL = MySensors v1 (1.3) default
+#define DEFAULT_RADIO_ID               ((uint64_t)0xA8A8E1FC00LL)                             // 0xA8A8E1FC00LL = MySensors v2 (1.4) default
+#define DEFAULT_RF_CRC_LENGTH          (2)                                                      // Length (in bytes) of NRF24 CRC
+#define DEFAULT_RF_PAYLOAD_SIZE        (MAX_RF_PAYLOAD_SIZE)                                                     // Define NRF24 payload size to maximum, so we'll slurp as many bytes as possible from the packet.
+
+
 
 // If BINARY_OUTPUT is defined, this sketch will output in hex format to the PC.
 // If undefined it will output text output for development.
 #define BINARY_OUTPUT
 
 #include "NRF24_sniff_types.h"
-
-// Macro to swap all bytes in 64bit value
-#define BSWAP_64(x)     (((uint64_t)(x) << 56) | \
-                        (((uint64_t)(x) << 40) & 0xff000000000000ULL) | \
-                        (((uint64_t)(x) << 24) & 0xff0000000000ULL) | \
-                        (((uint64_t)(x) << 8)  & 0xff00000000ULL) | \
-                        (((uint64_t)(x) >> 8)  & 0xff000000ULL) | \
-                        (((uint64_t)(x) >> 24) & 0xff0000ULL) | \
-                        (((uint64_t)(x) >> 40) & 0xff00ULL) | \
-                        ((uint64_t)(x)  >> 56))
-                       
-                       
+                      
 
 #ifndef BINARY_OUTPUT
 int my_putc( char c, FILE *t )
@@ -68,10 +65,31 @@ int my_putc( char c, FILE *t )
 }
 #endif
 
+// Set up nRF24L01 radio on SPI bus plus CE/CS pins
+static RF24 radio(RF_CE_PIN, RF_CS_PIN);
+
 static NRF24_packet_t bufferData[PACKET_BUFFER_SIZE]; 
 static CircularBuffer<NRF24_packet_t> packetBuffer(bufferData, sizeof(bufferData)/sizeof(bufferData[0]));
 static Serial_header_t serialHdr;
+static volatile Serial_config_t conf = {
+  DEFAULT_RF_CHANNEL,     DEFAULT_RF_DATARATE, DEFAULT_RF_ADDR_WIDTH,
+  DEFAULT_RF_ADDR_PROMISC_WIDTH,  DEFAULT_RADIO_ID,    DEFAULT_RF_CRC_LENGTH,
+  DEFAULT_RF_PAYLOAD_SIZE
+};
 
+#define GET_PAYLOAD_LEN(p) ((p->packet[conf.addressLen-conf.addressPromiscLen] & 0xFC) >> 2) // First 6 bits of nRF header contain length.
+
+
+inline static void dumpData(uint8_t* p, int len)
+{
+#ifndef BINARY_OUTPUT
+  while (len--) { printf("%02x", *p++); }
+  Serial.print(' ');
+#else
+  Serial.write(p, len);
+#endif
+}
+ 
 static void handleNrfIrq()
 {
   static uint8_t lostPacketCount = 0;
@@ -84,14 +102,14 @@ static void handleNrfIrq()
       p->timestamp = micros();  // Micros does not increase in interrupt, but it can be used.
       p->packetsLost = lostPacketCount;
       uint8_t packetLen = radio.getPayloadSize();
-      if (packetLen > RF_PAYLOAD_SIZE)
-        packetLen = RF_PAYLOAD_SIZE;
+      if (packetLen > MAX_RF_PAYLOAD_SIZE)
+        packetLen = MAX_RF_PAYLOAD_SIZE;
   
       radio.read( p->packet, packetLen );
       
       // Determine length of actual payload (in bytes) received from NRF24 packet control field (bits 7..2 of byte with offset 1)
       // Enhanced shockburst format is assumed!
-      if (getPayloadLen(p) <= RF_PAYLOAD_SIZE)
+      if (GET_PAYLOAD_LEN(p) <= MAX_RF_PAYLOAD_SIZE)
       {
         // Seems like a valid packet. Enqueue it.
         packetBuffer.pushFront(p);
@@ -116,6 +134,72 @@ static void handleNrfIrq()
   }
 }  
 
+static void activateConf( void )
+{
+  // Match MySensors' channel & datarate
+  radio.setChannel(conf.channel);
+  radio.setDataRate((rf24_datarate_e)conf.rate);
+
+  // Disable CRC & set fixed payload size to allow all packets captured to be returned by Nrf24.
+  radio.disableCRC();
+  radio.setPayloadSize(conf.maxPayloadSize);
+
+  // Configure listening pipe with the 'promiscuous' address and start listening
+  radio.setAddressWidth(conf.addressPromiscLen);
+  radio.openReadingPipe( PIPE, conf.address >> (8*(conf.addressLen - conf.addressPromiscLen)) );
+  radio.startListening();
+
+  // Attach interrupt handler to NRF IRQ output. Overwrites any earlier handler.
+  attachInterrupt(RF_IRQ, handleNrfIrq, FALLING);    // NRF24 Irq pin is active low.
+
+  // Initialize serial header's address member to promiscuous address.
+  uint64_t addr = conf.address;  // TODO: probably add some shifting!
+  for (int8_t i = sizeof(serialHdr.address)-1; i >= 0; --i)
+  {
+    serialHdr.address[i] = addr;
+    addr >>= 8;
+  }
+
+  // Send config back. Write record length & message type
+  uint8_t lenAndType = SET_MSG_TYPE(sizeof(conf), MSG_TYPE_CONFIG);
+  dumpData(&lenAndType, sizeof(lenAndType));
+  // Write config
+  dumpData((uint8_t*)&conf, sizeof(conf) );
+
+#ifndef BINARY_OUTPUT
+  Serial.print("Channel:     "); Serial.println(conf.channel);
+  Serial.print("Datarate:    ");
+  switch (conf.rate)
+  {
+    case 0: Serial.println("1Mb/s"); break;
+    case 1: Serial.println("2Mb/s"); break;
+    case 2: Serial.println("250Kb/s"); break;
+  }
+  Serial.print("Address:     0x");
+  uint64_t adr = conf.address;
+  for (int8_t i = conf.addressLen-1; i >= 0; --i)
+  {
+    if ( i >= conf.addressLen - conf.addressPromiscLen )
+    {
+      Serial.print((uint8_t)(adr >> (8*i)), HEX);
+    }
+    else
+    {
+      Serial.print("**");
+    }
+  }
+  Serial.println("");
+  Serial.print("Max payload: "); Serial.println(conf.maxPayloadSize);
+  Serial.print("CRC length:  "); Serial.println(conf.crcLength);
+  Serial.println("");
+  
+  radio.printDetails();
+
+  Serial.println("");
+  Serial.println("Listening...");
+#endif
+}
+
 
 void setup(void)
 {
@@ -123,7 +207,7 @@ void setup(void)
 
 #ifndef BINARY_OUTPUT
   fdevopen( &my_putc, 0);
-  Serial.println("--- RF24_sniff ---");
+  Serial.println("-- RF24 Sniff --");
 #endif
 
   radio.begin();
@@ -132,84 +216,79 @@ void setup(void)
   radio.setAutoAck(false);
   radio.setRetries(0,0);
 
-  // Match MySensors' channel & datarate
-  radio.setChannel(RF_CHANNEL);
-  radio.setDataRate(RF_DATARATE);
-
-  // Disable CRC & set fixed payload size to allow all packets captured to be returned by Nrf24.
-  radio.disableCRC();
-  radio.setPayloadSize(RF_PAYLOAD_SIZE);
-
-  // Configure listening pipe with the 'promiscuous' address and start listening
-  radio.setAddressWidth(RF_ADDR_WIDTH);
-  radio.openReadingPipe(PIPE, RF_PROMISC_ADDR);
-  radio.startListening();
-
-#ifndef BINARY_OUTPUT
-  radio.printDetails();
-#endif
-
-  // Attach interrupt handler to NRF IRQ output
+  // Configure nRF IRQ input
   pinMode(RF_IRQ_PIN, INPUT);
-  attachInterrupt(RF_IRQ, handleNrfIrq, FALLING);    // NRF24 Irq pin is active low.
 
-  // Initialize serial header's address member to promiscuous address, with bytes reversed and highest address byte at lowest byte position.
-  uint64_t addr = BSWAP_64(RF_PROMISC_ADDR) >> RF_ADDR_WIDTH*8;
-  for (uint8_t i = 0; i < sizeof(serialHdr.address); ++i)
-  {
-    serialHdr.address[i] = addr;
-    addr >>= 8;
-  }
-  
-#ifndef BINARY_OUTPUT
-  Serial.println("--- Listening... ---");
-#endif
+  activateConf();
 }
 
-inline static void dumpData(uint8_t* p, int len)
-{
-#ifndef BINARY_OUTPUT
-  while (len--) { printf("%02x", *p++); }
-  Serial.print(' ');
-#else
-  Serial.write(p, len);
-#endif
-}
- 
 void loop(void)
 {
   while (!packetBuffer.empty())
   {
     // One or more records present
     NRF24_packet_t* p = packetBuffer.getBack();
+    int serialHdrLen = sizeof(serialHdr) - (conf.addressLen - conf.addressPromiscLen);
     serialHdr.timestamp   = p->timestamp;
     serialHdr.packetsLost = p->packetsLost;
-    
+ 
     // Calculate data length in bits, then round up to get full number of bytes.
-    uint8_t dataLen = (    (sizeof(serialHdr)<<3)                 /* Serial packet header */
-                         + ((RF_MAX_ADDR_WIDTH-RF_ADDR_WIDTH)<<3) /* NRF24 LSB address byte(s) */
+    uint8_t dataLen = (    (serialHdrLen<<3)                 /* Serial packet header */
+                         + ((conf.addressLen - conf.addressPromiscLen)<<3) /* NRF24 LSB address byte(s) */
                          + 9                                      /* NRF24 control field */
-                         + (getPayloadLen(p) << 3)                /* NRF24 payload length */
-                         + (RF_CRC_LENGTH << 3)                   /* NRF24 crc length */
+                         + (GET_PAYLOAD_LEN(p) << 3)                /* NRF24 payload length */
+                         + (conf.crcLength << 3)                   /* NRF24 crc length */
                          + 7                                      /* Round up to full nr. of bytes */
-                      ) >> 3;                                     /* Convert from bite to bytes */
+                      ) >> 3;                                     /* Convert from bits to bytes */
 
-    // Write record length
-    dumpData(&dataLen, sizeof(dataLen));
+    // Write record length & message type
+    uint8_t lenAndType = SET_MSG_TYPE(dataLen, MSG_TYPE_PACKET);;
+    dumpData(&dataLen, sizeof(lenAndType));
     // Write serial header
-    dumpData((uint8_t*)&serialHdr, sizeof(serialHdr));
+    dumpData((uint8_t*)&serialHdr, serialHdrLen );
     // Write packet data
-    dumpData(p->packet, dataLen-sizeof(serialHdr));
+    dumpData(p->packet, dataLen - serialHdrLen);
 
 #ifndef BINARY_OUTPUT
     if (p->packetsLost > 0)
     {
       Serial.print(" Lost: "); Serial.print(p->packetsLost);
     }
-    printf("\r\n"); 
+    Serial.println(""); 
 #endif
     // Remove record as we're done with it.
     packetBuffer.popBack();
+  }
+ 
+  // Test if new config comes in
+  uint8_t lenAndType;
+  if (Serial.available() >= sizeof(lenAndType) + sizeof(conf))
+  {
+    lenAndType = Serial.read();
+    if ((GET_MSG_TYPE(lenAndType) == MSG_TYPE_CONFIG) && (GET_MSG_LEN(lenAndType) == sizeof(conf)))
+    {
+      // Disable nRF interrupt while reading & activating new configuration.
+      noInterrupts();
+      // Retrieve the new configuration
+      uint8_t* c = (uint8_t*)(&conf);
+      for (uint8_t i = 0; i < sizeof(conf); ++i)
+      {
+        *c++ = Serial.read();
+      }
+      // Clear any packets in the buffer and flush rx buffer.
+      packetBuffer.clear();
+      radio.flush_rx();
+      // Activate new config & re-enable nRF interrupt.
+      activateConf();
+  
+      interrupts();
+    }
+    else
+    {
+#ifndef BINARY_OUTPUT
+    Serial.println("Illegal configuration received!"); 
+#endif
+    }
   }
 }
 // vim:cin:ai:sts=2 sw=2 ft=cpp1
