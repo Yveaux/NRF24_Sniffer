@@ -31,6 +31,12 @@
 #include <errno.h>
 #include "XGetopt.h"
 
+#define MSG_TYPE_PACKET          (0)
+#define MSG_TYPE_CONFIG          (1)
+#define GET_MSG_LEN(var)         ((var) & 0x3F)
+#define SET_MSG_TYPE(var,type)   (((var) & 0x3F) | ((type) << 6))
+#define GET_MSG_TYPE(var)        ((var) >> 6)
+
 #define BITS_TO_BYTES(x)  (((x)+7)>>3)
 #define BYTES_TO_BITS(x)  ((x)<<3)
 
@@ -45,6 +51,16 @@
 #define SERIAL_MINIMUM_PACKET_LENGTH      (SERIAL_PACKET_LENGTH(NRF_MIN_PAYLOAD_LENGTH))
 #define SERIAL_MAXIMUM_PACKET_LENGTH      (SERIAL_PACKET_LENGTH(NRF_MAX_PAYLOAD_LENGTH))
 #define PCAP_MAXIMUM_PACKET_LENGTH        (SERIAL_MAXIMUM_PACKET_LENGTH)
+
+#define DEFAULT_BAUDRATE                (115200)
+#define DEFAULT_COMPORT                 (0)
+#define DEFAULT_RF_CHANNEL              (76)
+#define DEFAULT_RF_DATARATE             (0)
+#define DEFAULT_RF_ADDRESS_LEN          (5)
+#define DEFAULT_RF_ADDRESS_PROMISC_LEN  (4)
+#define DEFAULT_RF_BASE_ADDRESS         ((uint64_t)0xA8A8E1FC00ULL)
+#define DEFAULT_RF_CRC_LEN              (2)
+#define DEFAULT_RF_PAYLOAD_LEN          (32)
 
 static struct {
   uint32_t magic_number;   /* magic number */
@@ -63,6 +79,38 @@ typedef struct _pcaprec_hdr {
   uint32_t orig_len;       /* actual length of packet */
 } pcaprec_hdr;
 
+#pragma pack(push)
+#pragma pack(1)
+typedef struct _serialConfig
+{
+  uint8_t channel;
+  uint8_t rate;                        // rf24_datarate_e: 0 = 1Mb/s, 1 = 2Mb/s, 2 = 250Kb/s
+  uint8_t addressLen;                  // Number of bytes used in address, range [2..5]
+  uint8_t addressPromiscLen;           // Number of bytes used in promiscuous address, range [2..5]. E.g. addressLen=5, addressPromiscLen=4 => 1 byte unique identifier.
+  uint64_t address;                    // Base address, LSB first.
+  uint8_t crcLength;                   // Length of active CRC, range [0..2]
+  uint8_t maxPayloadSize;              // Maximum size of payload for nRF (including nRF header), range[4?..32]
+} serialConfig;
+
+static serialConfig config = { DEFAULT_RF_CHANNEL, DEFAULT_RF_DATARATE, DEFAULT_RF_ADDRESS_LEN, DEFAULT_RF_ADDRESS_PROMISC_LEN, DEFAULT_RF_BASE_ADDRESS, DEFAULT_RF_CRC_LEN, DEFAULT_RF_PAYLOAD_LEN };
+#pragma pack(pop)
+
+static void spin( const bool run )
+{
+  static const char spinner[] = "|/-\\"; // ".oO@*";
+  static size_t i = 0;
+  putchar('\b');
+  if (run)
+  {
+    putchar(spinner[i]);
+    i = (i + 1) % sizeof(spinner);
+  }
+  else
+  {
+    i = 0;  // Reset for next run
+  }
+}
+
 static void printHex( uint8_t* p, const int len, const bool newline = true )
 {
   for (int i = 0; i < len; ++i)
@@ -73,14 +121,60 @@ static void printHex( uint8_t* p, const int len, const bool newline = true )
     printf("\n");
 }  
 
-#define DEFAULT_BAUDRATE (115200)
-#define DEFAULT_COMPORT  (0)
-
 static void printProgress( const uint32_t numCaptured, const uint32_t numLost )
 {
   printf("\rCaptured %lu packets, Lost %lu packets", numCaptured, numLost);
 }
+    
+void printConfig( const serialConfig& config)
+{
+  printf("Channel:      %d\n", config.channel);
+  printf("Datarate:     %s\n", config.rate == 0 ? "1Mb/s" : config.rate == 1 ? "2Mb/s" : "250Kb/s" );
+  printf("Address:      0x");
+  uint64_t adr = config.address;
+  for (int8_t i = config.addressLen-1; i >= 0; --i)
+  {
+    if ( i >= config.addressLen - config.addressPromiscLen ) printf("%02x", (uint8_t)(adr >> (8*i)));
+    else                                                     printf("**");
+  }
+  puts("");
+  printf("Max payload:  %d\n", config.maxPayloadSize);
+  printf("CRC length:   %d\n", config.crcLength);
+}
 
+bool serialReadConfig( HANDLE hComm, serialConfig& config )
+{
+    // Use the ClearCommError function to get status info on the Serial port
+    // TODO: Use a timeout and return false when elapsed
+    COMSTAT stat;
+    uint8_t lenAndType;
+    while(1)
+    {
+      DWORD errors;
+      spin( true );
+      ClearCommError(hComm, &errors, &stat);
+      if (stat.cbInQue >= sizeof(lenAndType) + sizeof(config))
+        break;
+      Sleep(200 /*ms*/);
+    }
+    spin( false );
+
+    DWORD numRead;
+    bool ok = true;
+    ok &= TRUE == ReadFile(hComm, (LPVOID)&lenAndType, sizeof(lenAndType), &numRead, NULL);
+    ok &= TRUE == ReadFile(hComm, (LPVOID)&config, sizeof(config), &numRead, NULL);
+    ok &= GET_MSG_TYPE(lenAndType) == MSG_TYPE_CONFIG;
+    ok &= GET_MSG_LEN(lenAndType) == sizeof(config);
+    return ok;
+}
+
+bool writeSerialConfig( HANDLE hComm, const serialConfig& config )
+{
+  DWORD numWritten;
+  uint8_t lenAndType = SET_MSG_TYPE( sizeof(config), MSG_TYPE_CONFIG );
+  return    WriteFile(hComm, (LPVOID)&lenAndType, sizeof(lenAndType), &numWritten, NULL)
+         && WriteFile(hComm, (LPVOID)&config, sizeof(config), &numWritten, NULL);
+}
 
 int _tmain(int argc, _TCHAR* argv[])
 {
@@ -98,10 +192,11 @@ int _tmain(int argc, _TCHAR* argv[])
   uint32_t numCaptured;
   uint32_t numLost;
   bool verbose = false;
+  uint8_t lenAndType;
 
   /* Parse commandline arguments */
   int c;
-  while (!printHelp && ((c = getopt(argc, argv, _T("b:c:hv"))) != EOF))
+  while (!printHelp && ((c = getopt(argc, argv, _T("b:P:c:r:l:p:a:C:m:vh"))) != EOF))
   {
     switch (c)
     {
@@ -113,12 +208,74 @@ int _tmain(int argc, _TCHAR* argv[])
           printHelp = (baudrate == 0) || (errno == ERANGE);
         }
         break;
-      case _T('c'):
+      case _T('P'):
         printHelp = !optarg;
         if (optarg)
         {
           comport = strtol(optarg, NULL, 10);
           printHelp = ((comport == 0) && (optarg[0] != '0')) || (errno == ERANGE);
+        }
+        break;
+      case _T('c'):
+        printHelp = !optarg;
+        if (optarg)
+        {
+          long ch = strtol(optarg, NULL, 10);
+          printHelp = (ch < 0) || (ch > 127) || (errno == ERANGE);
+          config.channel = (uint8_t)ch;
+        }
+        break;
+      case _T('r'):
+        printHelp = !optarg;
+        if (optarg)
+        {
+          long r = strtol(optarg, NULL, 10);
+          printHelp = (r < 0) || (r > 2) || (errno == ERANGE);
+          config.rate = (uint8_t)r;
+        }
+        break;
+      case _T('l'):
+        printHelp = !optarg;
+        if (optarg)
+        {
+          long l = strtol(optarg, NULL, 10);
+          printHelp = (l < 3) || (l > 5) || (errno == ERANGE);
+          config.addressLen = (uint8_t)l;
+        }
+        break;
+      case _T('p'):
+        printHelp = !optarg;
+        if (optarg)
+        {
+          long l = strtol(optarg, NULL, 10);
+          printHelp = (l < 3) || (l > 5) || (errno == ERANGE);
+          config.addressPromiscLen = (uint8_t)l;
+        }
+        break;
+      case _T('a'):
+        printHelp = !optarg;
+        if (optarg)
+        {
+          config.address = _strtoui64(optarg, NULL, 0); // 0 = text defines bas, e.g. prefix 0x for HEX.
+          printHelp = (config.address < 0) || (config.address > 0xFFFFFFFFFFULL) || (errno == ERANGE);
+        }
+        break;
+      case _T('C'):
+        printHelp = !optarg;
+        if (optarg)
+        {
+          long l = strtol(optarg, NULL, 10);
+          printHelp = (l < 0) || (l > 2) || (errno == ERANGE);
+          config.crcLength = (uint8_t)l;
+        }
+        break;
+      case _T('m'):
+        printHelp = !optarg;
+        if (optarg)
+        {
+          long s = strtol(optarg, NULL, 10);
+          printHelp = (s < 0) || (s > 32) || (errno == ERANGE);
+          config.maxPayloadSize = (uint8_t)s;
         }
         break;
       case _T('v'):
@@ -132,6 +289,7 @@ int _tmain(int argc, _TCHAR* argv[])
         break;
     }
   }
+    
   if (printHelp)
   {
     printf("\n");
@@ -143,8 +301,15 @@ int _tmain(int argc, _TCHAR* argv[])
     printf("Usage: nrf24sniff [OPTION]\n");
     printf("\n");
     printf("Where [OPTION] can be one or more options of:\n");
-    printf(" -b    Set baudrate, e.g. -b9600. Defaults to %d\n", DEFAULT_BAUDRATE);
-    printf(" -c    Set comport, e.g. -c17. Defaults to COM%d\n", DEFAULT_COMPORT);
+    printf(" -b    Set baudrate. Default -b%d\n", DEFAULT_BAUDRATE);
+    printf(" -P    Set comport. Default -P%d (for COM%d)\n", DEFAULT_COMPORT, DEFAULT_COMPORT);
+    printf(" -c    RF channel, range [0..127]. Default -c%d\n", DEFAULT_RF_CHANNEL);
+    printf(" -r    Data rate, range [0..2], where 0=1Mb/s, 1=2Mb/b, 2=250Kb/s. Default -r%d\n", DEFAULT_RF_DATARATE);
+    printf(" -l    Address length in bytes, range [3..5]. Default -l%d\n", DEFAULT_RF_ADDRESS_LEN);
+    printf(" -p    Promiscuous address length in bytes, range [3..5]. Default -p%d\n", DEFAULT_RF_ADDRESS_PROMISC_LEN);
+    printf(" -a    Base address. Default -a0x%05llx\n", DEFAULT_RF_BASE_ADDRESS);
+    printf(" -C    CRC length in bytes, range [0..2]. Default -C%d\n", DEFAULT_RF_CRC_LEN);
+    printf(" -m    Maximum payload size in bytes, range [0..32]. Default -m%d\n", DEFAULT_RF_PAYLOAD_LEN);
     printf(" -v    Enable verbose output\n");
     printf(" -h    Print this helptext\n");
     goto out;
@@ -180,7 +345,6 @@ int _tmain(int argc, _TCHAR* argv[])
       printf("Failed to open Wireshark pipe: %d\n", GetLastError());
       goto out_pipe;
     }
-
     printf("Connect Wireshark to %s to continue...\n", pipeName);
     if (!ConnectNamedPipe(hPipe, NULL))
     {
@@ -188,8 +352,8 @@ int _tmain(int argc, _TCHAR* argv[])
       goto out_pipe;
     }
 
-    DWORD numWritten;
     assert(sizeof(pcap_hdr) == 24 );
+    DWORD numWritten;
     (void)WriteFile(hPipe, &pcap_hdr, sizeof(pcap_hdr), &numWritten, NULL);
 
     char portName[100];
@@ -206,7 +370,7 @@ int _tmain(int argc, _TCHAR* argv[])
       printf("Error!\n", portName);
       if(GetLastError() == ERROR_FILE_NOT_FOUND)
       {
-          printf("Port %s not available.\n", portName);
+        printf("Port %s not available.\n", portName);
       }
       goto out_comm;
     }
@@ -216,21 +380,44 @@ int _tmain(int argc, _TCHAR* argv[])
     // get the current comm parameters
     if (!GetCommState(hComm, &dcbSerialParams))
     {
-      printf("Failed to get current serial parameters!");
+      puts("Failed to get current serial parameters!");
       goto out_comm;
     }
 
+    // Set serial port parameters. This will reset the arduino!
     dcbSerialParams.BaudRate = baudrate;
     dcbSerialParams.ByteSize = 8;
     dcbSerialParams.StopBits = ONESTOPBIT;
     dcbSerialParams.Parity   = NOPARITY;
     if(!SetCommState(hComm, &dcbSerialParams))
     {
-      printf("ALERT: Could not set Serial Port parameters");
+      puts("ALERT: Could not set Serial Port parameters");
       goto out_comm;
     }
+
     // Purge serial buffer
     (void)PurgeComm(hComm, PURGE_RXCLEAR | PURGE_TXCLEAR);
+
+    printf("Wait for sniffer to restart  ");
+
+    // Sniffer will send configuration on startup. Wait for this packet, then
+    // send our configuration and start listening for packets.
+    serialConfig dummyConfig;
+    if (!serialReadConfig(hComm, dummyConfig ))
+    {
+      puts("\nALERT: Failed waiting for sniffer to restart");
+      goto out_comm;
+    }
+
+    puts("Ok\n");
+    printConfig(config);
+
+    if (!writeSerialConfig( hComm, config ))
+    {
+      puts("ALERT: Could not send config");
+      goto out_comm;
+    }
+    // Sniffer will respond with new config. Safe to ignore here; it will be handled in regular packet handler.
 
     firstPacket = true;
 
@@ -255,14 +442,14 @@ int _tmain(int argc, _TCHAR* argv[])
       DWORD errors;
       COMSTAT stat;
       ClearCommError(hComm, &errors, &stat);
-      DWORD numToRead = min(1, min(stat.cbInQue, sizeof(buff)-buffIdx));
+      DWORD numToRead = max(1, min(stat.cbInQue, sizeof(buff)-buffIdx));
         
       // Blocking read on serial port,reading either 1 byte when nothing is available (block),
       // the amount of data available on the port or the amount that still fits in the buffer.
       // This offloads the CPU compared to continuously polling for available data in the port.
       assert(buffIdx < sizeof(buff));
       DWORD numRead;
-      if (ReadFile(hComm, (LPVOID)&buff[buffIdx], 1, &numRead, NULL))
+      if (ReadFile(hComm, (LPVOID)&buff[buffIdx], 1 /* TODO: should be numToRead I think */, &numRead, NULL))
       {
         buffIdx += numRead;
       }
@@ -278,7 +465,8 @@ int _tmain(int argc, _TCHAR* argv[])
       {
 //        printHex( reinterpret_cast<uint8_t*>(&buff), min(buffIdx,50) );
         uint8_t* sp = buff;
-        DWORD lenSerPacket = *sp++;
+        lenAndType = *sp++;
+        DWORD lenSerPacket = GET_MSG_LEN(lenAndType);
         DWORD lenInBuff = 1 + lenSerPacket;
         if ((lenSerPacket < SERIAL_MINIMUM_PACKET_LENGTH) || (lenSerPacket > SERIAL_MAXIMUM_PACKET_LENGTH))
         {
@@ -291,70 +479,84 @@ int _tmain(int argc, _TCHAR* argv[])
         {
           // Full packet is available in buffer. Consume it.
           // Format:
-          // 1 byte                       length of serial packet, excluding this byte
-          // TIMESTAMP_LENGTH byte(s)     timestamp of packet, in [us] since start of Arduino (wraps after ca. 70 minutes for 4 bytes)
-          // PACKETS_LOST_LENGTH byte(s)  Nr of packets lost since last packet, stops counting at 255 (for 1 byte).
-          // NRF_ADDRESS_LENGTH byte(s)   full target node address
-          // 9bits                        NRF24 control field
-          // [0..32]*8bits                NRF24 payload, not byte aligned!
-          // NRF_CRC_LENGTH byte(s)       NRF24 CRC field, not byte aligned!
+          // 1 byte                       length & type of serial packet, excluding this byte
+          // MSG_TYPE_PACKET
+          //     TIMESTAMP_LENGTH byte(s)     timestamp of packet, in [us] since start of Arduino (wraps after ca. 70 minutes for 4 bytes)
+          //     PACKETS_LOST_LENGTH byte(s)  Nr of packets lost since last packet, stops counting at 255 (for 1 byte).
+          //     NRF_ADDRESS_LENGTH byte(s)   full target node address
+          //     9bits                        NRF24 control field
+          //     [0..32]*8bits                NRF24 payload, not byte aligned!
+          //     NRF_CRC_LENGTH byte(s)       NRF24 CRC field, not byte aligned!
+          // MSG_TYPE_CONFIG
+          //     <ignored>
 
-          uint8_t pcapPacket[PCAP_MAXIMUM_PACKET_LENGTH+1];
-          uint8_t* pp = pcapPacket;
-
-          // PCap packet will contain everything from serial packet, except timestamp
-          DWORD lenPCapPacket = lenSerPacket - TIMESTAMP_LENGTH;
-
-          // Read timestamp (passed through pcap header)
-          uint32_t serTimestamp_us = *(reinterpret_cast<uint32_t*>(sp));
-          sp += TIMESTAMP_LENGTH;
-          if (firstPacket)
+          switch( GET_MSG_TYPE(lenAndType) )
           {
-            timestamp_us = 0ULL;
-            // Previous timestamp not registered yet. Store it now so first packet gets timestamp 0.
-            prevSerTimestamp_us = serTimestamp_us;
-          }
-          // Increment timestamp with time passed since previous packet.
-          timestamp_us += serTimestamp_us - prevSerTimestamp_us;
-          prevSerTimestamp_us = serTimestamp_us;
+            case MSG_TYPE_PACKET:
+              {
+                uint8_t pcapPacket[PCAP_MAXIMUM_PACKET_LENGTH+1];
+                uint8_t* pp = pcapPacket;
 
-          uint8_t packetsLost = *sp++;
-          numLost += packetsLost;
-//          if (packetsLost > 0)
-//            printf("%d packets lost since last packet\n", packetsLost);
+                // PCap packet will contain everything from serial packet, except timestamp
+                DWORD lenPCapPacket = lenSerPacket - TIMESTAMP_LENGTH;
 
-          // Copy data 1:1 from serial packet, not byte aligned.
-          (void)memcpy(pp, sp, lenPCapPacket);
-          // For last byte only the MSbit has value; rest will be cleared
-          *(pp+lenPCapPacket-1) &= 0x80;
+                // Read timestamp (passed through pcap header)
+                uint32_t serTimestamp_us = *(reinterpret_cast<uint32_t*>(sp));
+                sp += TIMESTAMP_LENGTH;
+                if (firstPacket)
+                {
+                  timestamp_us = 0ULL;
+                  // Previous timestamp not registered yet. Store it now so first packet gets timestamp 0.
+                  prevSerTimestamp_us = serTimestamp_us;
+                }
+                // Increment timestamp with time passed since previous packet.
+                timestamp_us += serTimestamp_us - prevSerTimestamp_us;
+                prevSerTimestamp_us = serTimestamp_us;
 
-          // Create packet header
-          assert(sizeof(pcaprec_hdr) == 16);
-          pcaprec_hdr hdr = { (uint32_t)(timestamp_us/1000000), (uint32_t)(timestamp_us%1000000), lenPCapPacket, lenPCapPacket };
+                uint8_t packetsLost = *sp++;
+                numLost += packetsLost;
+      //          if (packetsLost > 0)
+      //            printf("%d packets lost since last packet\n", packetsLost);
 
-          if (verbose)
-          {
-            printf("\n");
-            printHex( buff, lenInBuff );
-//          printHex( pcapPacket, lenPCapPacket );
-          }
-          // Write record header & data
-          DWORD numWritten;
-          if (    !WriteFile(hPipe, &hdr, sizeof(hdr), &numWritten, NULL) 
-               || !WriteFile(hPipe, &pcapPacket, lenPCapPacket, &numWritten, NULL))
-          {
-            /* Restarting the pipe */
-            printf("\nPipe disconnected\n");
-            pipeOPen = false;
-          }
+                // Copy data 1:1 from serial packet, not byte aligned.
+                (void)memcpy(pp, sp, lenPCapPacket);
+                // For last byte only the MSbit has value; rest will be cleared
+                *(pp+lenPCapPacket-1) &= 0x80;
+
+                // Create packet header
+                assert(sizeof(pcaprec_hdr) == 16);
+                pcaprec_hdr hdr = { (uint32_t)(timestamp_us/1000000), (uint32_t)(timestamp_us%1000000), lenPCapPacket, lenPCapPacket };
+
+                if (verbose)
+                {
+                  printf("\n");
+                  printHex( buff, lenInBuff );
+      //          printHex( pcapPacket, lenPCapPacket );
+                }
+                // Write record header & data
+                DWORD numWritten;
+                if (    !WriteFile(hPipe, &hdr, sizeof(hdr), &numWritten, NULL) 
+                     || !WriteFile(hPipe, &pcapPacket, lenPCapPacket, &numWritten, NULL))
+                {
+                  /* Restarting the pipe */
+                  printf("\nPipe disconnected\n");
+                  pipeOPen = false;
+                }
+              }
+              firstPacket = false;
+              numCaptured++;
+              printProgress(numCaptured, numLost);
+              break;
+
+            default:   // Ignore
+              break;
+          } // switch MSG_TYPE
+
           // Remove packet from buffer
           (void)memmove(buff, buff+lenInBuff, buffIdx-lenInBuff);             // Memmove! Regions overlap.
           (void)memset(buff+buffIdx, 0, sizeof(buff)-buffIdx);                // Optional: Clear remaining buffer
           buffIdx -= lenInBuff;
 //          printf("Consumed %d bytes. New idx %d\n", lenInBuff, buffIdx);
-          firstPacket = false;
-          numCaptured++;
-          printProgress(numCaptured, numLost);
         }
         else
         {
