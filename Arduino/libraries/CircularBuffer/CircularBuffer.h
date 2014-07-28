@@ -31,34 +31,42 @@
 template <class T> class CircularBuffer
 {
   public:
-    /* Constructor
+    /** Constructor
      * @param buffer   Preallocated buffer of at least size records.
      * @param size     Number of records available in the buffer.
      */
     CircularBuffer(T* buffer, const uint8_t size )
-      : m_size(size), m_buff(buffer), m_front(0), m_fill(0)
+      : m_size(size), m_buff(buffer)
     {
+      clear();
     }
 
-    /* Test if the circular buffer is empty */
+    /** Clear all entries in the circular buffer. */
+    void clear(void)
+    {
+      m_front = 0;
+      m_fill  = 0;
+    }
+
+    /** Test if the circular buffer is empty */
     inline bool empty(void) const
     {
       return !m_fill;
     }
 
-    /* Return the number of records stored in the buffer */
-    uint8_t available(void) const
+    /** Return the number of records stored in the buffer */
+    inline uint8_t available(void) const
     {
       return m_fill;
     }
 
-    /* Test if the circular buffer is full */
+    /** Test if the circular buffer is full */
     inline bool full(void) const
     {
       return m_fill == m_size;
     }
     
-    /* Aquire record on front of the buffer, for writing.
+    /** Aquire record on front of the buffer, for writing.
      * After filling the record, it has to be pushed to actually
      * add it to the buffer.
      * @return Pointer to record, or NULL when buffer is full.
@@ -73,7 +81,7 @@ template <class T> class CircularBuffer
       return f;
     }
     
-    /* Push record to front of the buffer
+    /** Push record to front of the buffer
      * @param record   Record to push. If record was aquired previously (using getFront) its
      *                 data will not be copied as it is already present in the buffer.
      * @return True, when record was pushed successfully.
@@ -95,7 +103,7 @@ template <class T> class CircularBuffer
       return ok;
     }
 
-    /* Aquire record on back of the buffer, for reading.
+    /** Aquire record on back of the buffer, for reading.
      * After reading the record, it has to be pop'ed to actually
      * remove it from the buffer.
      * @return Pointer to record, or NULL when buffer is empty.
@@ -110,7 +118,7 @@ template <class T> class CircularBuffer
       return b;
     }
 
-    /* Remove record from back of the buffer.
+    /** Remove record from back of the buffer.
      * @return True, when record was pop'ed successfully.
      */
     bool popBack(void)
