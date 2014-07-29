@@ -24,15 +24,22 @@
 #include <RF24.h>
 #include <RF24_config.h>
 
+#define LED_SUPPORTED
+
 // Hardware configuration
 #define RF_CE_PIN                      (9)
 #define RF_CS_PIN                      (10)
 #define RF_IRQ_PIN                     (2)
 #define RF_IRQ                         (RF_IRQ_PIN-2)                                           // Usually the interrupt = pin -2 (on uno/nano anyway)
-
+#ifdef LED_SUPPORTED
+#define LED_PIN_LISTEN                 (A0)
+#define LED_PIN_RX                     (A1)
+#define LED_PIN_TX                     (A2)
+#define LED_PIN_CONFIG                 (A3)
+#define LED_PIN_BUFF_FULL              (A4)
+#endif
 
 #define RF_MAX_ADDR_WIDTH              (5)                                                      // Maximum address width, in bytes. MySensors use 5 bytes for addressing, where lowest byte is for node addressing.
-/*delete*/#define RF_PROMISC_ADDR      ((BASE_RADIO_ID)>>((RF_MAX_ADDR_WIDTH-RF_ADDR_WIDTH)*8)) // Our 'promiscuous' node address. BASE_RADIO_ID = Base address for MySensors.
 #define MAX_RF_PAYLOAD_SIZE            (32)
 #define SER_BAUDRATE                   (115200)
 #define PACKET_BUFFER_SIZE             (30)                                                     // Maximum number of packets that can be buffered between reception by NRF and transmission over serial port.
@@ -42,12 +49,12 @@
 // Startup defaults until user reconfigures it
 #define DEFAULT_RF_CHANNEL             (76)                                                     // 76 = Default channel for MySensors.
 #define DEFAULT_RF_DATARATE            (RF24_1MBPS)                                             // Datarate
-#define DEFAULT_RF_ADDR_WIDTH          (RF_MAX_ADDR_WIDTH)                                    // We use all but the lowest address byte for promiscuous listening. First byte of data received will then be the node address.
+#define DEFAULT_RF_ADDR_WIDTH          (RF_MAX_ADDR_WIDTH)                                      // We use all but the lowest address byte for promiscuous listening. First byte of data received will then be the node address.
 #define DEFAULT_RF_ADDR_PROMISC_WIDTH  (DEFAULT_RF_ADDR_WIDTH-1)
-//#define DEFAULT_RADIO_ID               ((uint64_t)0xABCDABC000LL)                               // 0xABCDABC000LL = MySensors v1 (1.3) default
-#define DEFAULT_RADIO_ID               ((uint64_t)0xA8A8E1FC00LL)                             // 0xA8A8E1FC00LL = MySensors v2 (1.4) default
+//#define DEFAULT_RADIO_ID               ((uint64_t)0xABCDABC000LL)                             // 0xABCDABC000LL = MySensors v1 (1.3) default
+#define DEFAULT_RADIO_ID               ((uint64_t)0xA8A8E1FC00LL)                               // 0xA8A8E1FC00LL = MySensors v2 (1.4) default
 #define DEFAULT_RF_CRC_LENGTH          (2)                                                      // Length (in bytes) of NRF24 CRC
-#define DEFAULT_RF_PAYLOAD_SIZE        (MAX_RF_PAYLOAD_SIZE)                                                     // Define NRF24 payload size to maximum, so we'll slurp as many bytes as possible from the packet.
+#define DEFAULT_RF_PAYLOAD_SIZE        (MAX_RF_PAYLOAD_SIZE)                                    // Define NRF24 payload size to maximum, so we'll slurp as many bytes as possible from the packet.
 
 
 
@@ -89,15 +96,21 @@ inline static void dumpData(uint8_t* p, int len)
   Serial.write(p, len);
 #endif
 }
- 
+
 static void handleNrfIrq()
 {
   static uint8_t lostPacketCount = 0;
   // Loop until RX buffer(s) contain no more packets.
   while (radio.available())
   {
+#ifdef LED_SUPPORTED
+    digitalWrite(LED_PIN_RX, HIGH);
+#endif
     if (!packetBuffer.full())
     {
+#ifdef LED_SUPPORTED
+      digitalWrite(LED_PIN_BUFF_FULL, LOW);
+#endif
       NRF24_packet_t* p = packetBuffer.getFront();
       p->timestamp = micros();  // Micros does not increase in interrupt, but it can be used.
       p->packetsLost = lostPacketCount;
@@ -123,6 +136,9 @@ static void handleNrfIrq()
     else
     {
       // Buffer full. Increase lost packet counter.
+#ifdef LED_SUPPORTED
+      digitalWrite(LED_PIN_BUFF_FULL, HIGH);
+#endif
       bool tx_ok, tx_fail, rx_ready;
       if (lostPacketCount < 255)
         lostPacketCount++;
@@ -131,11 +147,18 @@ static void handleNrfIrq()
       // Flush buffer to drop the packet.
       radio.flush_rx();
     }
+#ifdef LED_SUPPORTED
+    digitalWrite(LED_PIN_RX, LOW);
+#endif
   }
 }  
 
 static void activateConf( void )
 {
+#ifdef LED_SUPPORTED
+  digitalWrite(LED_PIN_CONFIG, HIGH);
+#endif
+
   // Match MySensors' channel & datarate
   radio.setChannel(conf.channel);
   radio.setDataRate((rf24_datarate_e)conf.rate);
@@ -198,11 +221,27 @@ static void activateConf( void )
   Serial.println("");
   Serial.println("Listening...");
 #endif
+#ifdef LED_SUPPORTED
+  digitalWrite(LED_PIN_CONFIG, LOW);
+#endif
 }
 
 
 void setup(void)
 {
+#ifdef LED_SUPPORTED
+  pinMode(LED_PIN_LISTEN,    OUTPUT);
+  pinMode(LED_PIN_RX,        OUTPUT);
+  pinMode(LED_PIN_TX,        OUTPUT);
+  pinMode(LED_PIN_CONFIG,    OUTPUT);
+  pinMode(LED_PIN_BUFF_FULL, OUTPUT);
+  digitalWrite(LED_PIN_LISTEN,    LOW);
+  digitalWrite(LED_PIN_RX,        LOW);
+  digitalWrite(LED_PIN_TX,        LOW);
+  digitalWrite(LED_PIN_CONFIG,    LOW);
+  digitalWrite(LED_PIN_BUFF_FULL, LOW);
+#endif
+
   Serial.begin(SER_BAUDRATE);
 
 #ifndef BINARY_OUTPUT
@@ -219,6 +258,10 @@ void setup(void)
   // Configure nRF IRQ input
   pinMode(RF_IRQ_PIN, INPUT);
 
+#ifdef LED_SUPPORTED
+  digitalWrite(LED_PIN_LISTEN, HIGH);
+#endif
+
   activateConf();
 }
 
@@ -226,6 +269,9 @@ void loop(void)
 {
   while (!packetBuffer.empty())
   {
+#ifdef LED_SUPPORTED
+    digitalWrite(LED_PIN_TX, HIGH);
+#endif
     // One or more records present
     NRF24_packet_t* p = packetBuffer.getBack();
     int serialHdrLen = sizeof(serialHdr) - (conf.addressLen - conf.addressPromiscLen);
@@ -242,7 +288,7 @@ void loop(void)
                       ) >> 3;                                     /* Convert from bits to bytes */
 
     // Write record length & message type
-    uint8_t lenAndType = SET_MSG_TYPE(dataLen, MSG_TYPE_PACKET);;
+    uint8_t lenAndType = SET_MSG_TYPE(dataLen, MSG_TYPE_PACKET);
     dumpData(&dataLen, sizeof(lenAndType));
     // Write serial header
     dumpData((uint8_t*)&serialHdr, serialHdrLen );
@@ -258,6 +304,9 @@ void loop(void)
 #endif
     // Remove record as we're done with it.
     packetBuffer.popBack();
+#ifdef LED_SUPPORTED
+    digitalWrite(LED_PIN_TX, LOW);
+#endif
   }
  
   // Test if new config comes in
