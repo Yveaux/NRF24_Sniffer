@@ -345,7 +345,8 @@ int _tmain(int argc, _TCHAR* argv[])
       printf("Failed to open Wireshark pipe: %d\n", GetLastError());
       goto out_pipe;
     }
-    printf("Connect Wireshark to %s to continue...\n", pipeName);
+
+    printf("\nConnect Wireshark to %s to continue...\n", pipeName);
     if (!ConnectNamedPipe(hPipe, NULL))
     {
       printf("Failed to connect to Wireshark pipe: %d\n", GetLastError());
@@ -384,7 +385,7 @@ int _tmain(int argc, _TCHAR* argv[])
       goto out_comm;
     }
 
-    // Set serial port parameters. This will reset the arduino!
+    // Set serial port parameters.
     dcbSerialParams.BaudRate = baudrate;
     dcbSerialParams.ByteSize = 8;
     dcbSerialParams.StopBits = ONESTOPBIT;
@@ -392,6 +393,14 @@ int _tmain(int argc, _TCHAR* argv[])
     if(!SetCommState(hComm, &dcbSerialParams))
     {
       puts("ALERT: Could not set Serial Port parameters");
+      goto out_comm;
+    }
+
+    // Reset the arduino!
+    if (!(    EscapeCommFunction(hComm,CLRDTR) && EscapeCommFunction(hComm,CLRRTS)
+           && EscapeCommFunction(hComm,SETDTR) && EscapeCommFunction(hComm,SETRTS) ))
+    {
+      puts("\nALERT: Failed to reset sniffer");
       goto out_comm;
     }
 
