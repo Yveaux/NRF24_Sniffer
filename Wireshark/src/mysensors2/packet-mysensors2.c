@@ -37,7 +37,8 @@ static dissector_handle_t mysensors_handle;
 static int hf_mysensors_version = -1;    
 static int hf_mysensors_length = -1;     
 static int hf_mysensors_commandtype = -1;
-static int hf_mysensors_ack = -1;
+static int hf_mysensors_isack = -1;
+static int hf_mysensors_reqack = -1;
 static int hf_mysensors_datatype = -1;   
 static int hf_mysensors_type = -1;       
 static int hf_mysensors_sensor = -1;     
@@ -86,7 +87,8 @@ typedef enum {
   P_UINT16,
   P_LONG32,
   P_ULONG32,
-  P_CUSTOM
+  P_CUSTOM,
+  P_FLOAT32,
 } MySensors_PayloadType;
 
 static const value_string payload_types[] = {
@@ -97,6 +99,7 @@ static const value_string payload_types[] = {
   { 4, "LONG32" },
   { 5, "ULONG32" },
   { 6, "CUSTOM" },
+  { 7, "FLOAT32" },
   { 0, NULL }
 };
 
@@ -139,6 +142,7 @@ static const value_string data_types[] = {
   { 34, "FLOW" },
   { 35, "VOLUME" },
   { 36, "LOCK_STATUS" },
+  { 37, "DUST_LEVEL" },
   { 0, NULL }
 };
 
@@ -151,8 +155,8 @@ static const value_string internal_types[] = {
   { 4,  "ID_RESPONSE" },
   { 5,  "INCLUSION_MODE" },
   { 6,  "CONFIG" },
-  { 7,  "PING" },
-  { 8,  "PING_ACK" },
+  { 7,  "FIND_PARENT" },
+  { 8,  "FIND_PARENT_RESPONSE" },
   { 9,  "LOG_MESSAGE" },
   { 10, "CHILDREN" },
   { 11, "SKETCH_NAME" },
@@ -184,6 +188,10 @@ static const value_string sensor_types[] = {
   { 19, "LOCK" },
   { 20, "IR" },
   { 21, "WATER" },
+  { 22, "AIR_QUALITY" },
+  { 23, "CUSTOM" },
+  { 24, "DUST" },
+  { 25, "SCENE_CONTROLLER" },
   { 0, NULL }
 };
 
@@ -231,6 +239,10 @@ static const gchar* payloadToStr( guint8 dataType, tvbuff_t* tvb_data, guint8 pa
     case P_ULONG32:
       (void)sprintf(buff, "%lu", tvb_get_letohl(tvb_data, 0));
       break;
+    case P_FLOAT32:
+      (void)sprintf(buff, "%f", (float)tvb_get_letohl(tvb_data, 0));
+      break;
+    case P_CUSTOM:
     default:
       (void)sprintf(buff, "?");
       break;
@@ -239,13 +251,14 @@ static const gchar* payloadToStr( guint8 dataType, tvbuff_t* tvb_data, guint8 pa
 } 
 
 static gchar* buildColInfo( packet_info *pinfo, guint8 payloadLen, guint8 dataType, MySensors_Command commandType,
-                            guint8 ack, guint8 type, guint8 sensor, tvbuff_t* tvb_data )
+                            guint8 reqack, guint8 isack, guint8 type, guint8 sensor, tvbuff_t* tvb_data )
 {
   static gchar buff[100];
   gchar* s = buff;
-  s += sprintf( s, "Cmd:%s, Ack:%d, Type:%s, Sns:%d",
+  s += sprintf( s, "Cmd:%s, ReqAck:%d, IsAck:%d, Type:%s, Sns:%d",
                  val_to_str(commandType, command_types, "%d"),
-                 ack,
+                 reqack,
+                 isack,
                  typeToStr(commandType, type),
                  sensor
                );
@@ -277,37 +290,41 @@ static void dissect_mysensors(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tre
     proto_item *ti = NULL;
     proto_tree *mysensors_tree = NULL;
     tvbuff_t* tvb_next;
-    guint8 payloadLen, dataType, type, sensor, sender, last, dest, ack;
+    guint8 payloadLen, dataType, type, sensor, sender, last, dest, reqack, isack;
     MySensors_Command commandType;
     gchar* info;
     
     ti = proto_tree_add_item(tree, proto_mysensors, tvb, 0 /*start*/, -1 /*to end*/, ENC_NA);
     mysensors_tree = proto_item_add_subtree(ti, ett_mysensors);
     
+    proto_tree_add_item(mysensors_tree, hf_mysensors_last, tvb, bitoffset>>3, 1, encoding);
+    last = tvb_get_guint8(tvb, bitoffset>>3);
+    bitoffset += 8;
+    proto_tree_add_item(mysensors_tree, hf_mysensors_sender, tvb, bitoffset>>3, 1, encoding);
+    sender = tvb_get_guint8(tvb, bitoffset>>3);
+    bitoffset += 8;
+    proto_tree_add_item(mysensors_tree, hf_mysensors_dest, tvb, bitoffset>>3, 1, encoding);
+    dest = tvb_get_guint8(tvb, bitoffset>>3);
+    bitoffset += 8;
+
     proto_tree_add_bits_item(mysensors_tree, hf_mysensors_length, tvb, bitoffset, 5, encoding);
     payloadLen = tvb_get_bits8(tvb, bitoffset, 5);
     bitoffset += 5;
     proto_tree_add_bits_item(mysensors_tree, hf_mysensors_version, tvb, bitoffset, 3, encoding);
     bitoffset += 3;
-    proto_tree_add_bits_item(mysensors_tree, hf_mysensors_datatype, tvb, bitoffset, 4, encoding);
-    dataType = tvb_get_bits8(tvb, bitoffset, 4);  // Type of payload
-    bitoffset += 4;
-    proto_tree_add_bits_item(mysensors_tree, hf_mysensors_ack, tvb, bitoffset, 1, encoding);
-    ack = (MySensors_Command)tvb_get_bits8(tvb, bitoffset, 1);
+    proto_tree_add_bits_item(mysensors_tree, hf_mysensors_datatype, tvb, bitoffset, 3, encoding);
+    dataType = tvb_get_bits8(tvb, bitoffset, 3);  // Type of payload
+    bitoffset += 3;
+    proto_tree_add_bits_item(mysensors_tree, hf_mysensors_isack, tvb, bitoffset, 1, encoding);
+    isack = (MySensors_Command)tvb_get_bits8(tvb, bitoffset, 1);
+    bitoffset += 1;
+    proto_tree_add_bits_item(mysensors_tree, hf_mysensors_reqack, tvb, bitoffset, 1, encoding);
+    reqack = (MySensors_Command)tvb_get_bits8(tvb, bitoffset, 1);
     bitoffset += 1;
     proto_tree_add_bits_item(mysensors_tree, hf_mysensors_commandtype, tvb, bitoffset, 3, encoding);
     commandType = (MySensors_Command)tvb_get_bits8(tvb, bitoffset, 3);
     bitoffset += 3;
 
-    proto_tree_add_item(mysensors_tree, hf_mysensors_sender, tvb, bitoffset>>3, 1, encoding);
-    sender = tvb_get_guint8(tvb, bitoffset>>3);
-    bitoffset += 8;
-    proto_tree_add_item(mysensors_tree, hf_mysensors_last, tvb, bitoffset>>3, 1, encoding);
-    last = tvb_get_guint8(tvb, bitoffset>>3);
-    bitoffset += 8;
-    proto_tree_add_item(mysensors_tree, hf_mysensors_dest, tvb, bitoffset>>3, 1, encoding);
-    dest = tvb_get_guint8(tvb, bitoffset>>3);
-    bitoffset += 8;
     type = tvb_get_guint8(tvb, bitoffset>>3);
     proto_tree_add_uint_format_value(mysensors_tree, hf_mysensors_type, tvb, bitoffset>>3, 1, type, "%s (%d)", typeToStr(commandType, type), (guint8)type);
     bitoffset += 8;
@@ -318,7 +335,7 @@ static void dissect_mysensors(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tre
     // Create tvb for the payload.
     tvb_next = tvb_new_subset(tvb, bitoffset>>3, payloadLen, payloadLen);
 
-    info = buildColInfo( pinfo, payloadLen, dataType, commandType, ack, type, sensor, tvb_next );
+    info = buildColInfo( pinfo, payloadLen, dataType, commandType, reqack, isack, type, sensor, tvb_next );
     col_add_str(pinfo->cinfo, COL_INFO, info);
     proto_item_append_text(ti, " - %s", info);
     col_add_fstr(pinfo->cinfo, COL_DEF_SRC, "%d", sender);
@@ -338,7 +355,7 @@ static gboolean dissect_mysensors_heur(tvbuff_t *tvb, packet_info *pinfo, proto_
     return FALSE;
 
   /* 1) Test protocol verion -- only version 2 (1.4) currently supported */
-  version = tvb_get_bits8(tvb, 5, 3);
+  version = tvb_get_bits8(tvb, 3*8+5, 3);
   if (version != V2_14)
     return FALSE;
 
@@ -350,14 +367,15 @@ static gboolean dissect_mysensors_heur(tvbuff_t *tvb, packet_info *pinfo, proto_
 void proto_register_mysensors(void)
 {
     static hf_register_info hf[] = {
+        { &hf_mysensors_last,           { "Last node", "mysensors.last", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_mysensors_sender,         { "Sender node", "mysensors.sender", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_mysensors_dest,           { "Destination node", "mysensors.dest", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_mysensors_length,         { "Length", "mysensors.paylen", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_mysensors_version,        { "Version", "mysensors.version", FT_UINT8, BASE_DEC, VALS(version_types), 0x0, NULL, HFILL } },
         { &hf_mysensors_datatype,       { "Data type", "mysensors.datatype", FT_UINT8, BASE_DEC, VALS(payload_types), 0x0, NULL, HFILL } },
         { &hf_mysensors_commandtype,    { "Command type", "mysensors.cmdtype", FT_UINT8, BASE_DEC, VALS(command_types), 0x0, NULL, HFILL } },
-        { &hf_mysensors_ack,            { "Ack", "mysensors.ack", FT_UINT8, BASE_DEC, VALS(ack_types), 0x0, NULL, HFILL } },
-        { &hf_mysensors_sender,         { "Sender node", "mysensors.sender", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
-        { &hf_mysensors_last,           { "Last node", "mysensors.last", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
-        { &hf_mysensors_dest,           { "Destination node", "mysensors.dest", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_mysensors_isack,          { "IsAck", "mysensors.isack", FT_UINT8, BASE_DEC, VALS(ack_types), 0x0, NULL, HFILL } },
+        { &hf_mysensors_reqack,         { "ReqAck", "mysensors.reqack", FT_UINT8, BASE_DEC, VALS(ack_types), 0x0, NULL, HFILL } },
         { &hf_mysensors_type,           { "Type", "mysensors.type", FT_UINT8, BASE_DEC, NULL /*representation differs with command*/, 0x0, NULL, HFILL } },
         { &hf_mysensors_sensor,         { "Sensor", "mysensors.sensor", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
       };
