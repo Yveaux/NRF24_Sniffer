@@ -143,6 +143,8 @@ static const value_string data_types[] = {
   { 35, "VOLUME" },
   { 36, "LOCK_STATUS" },
   { 37, "DUST_LEVEL" },
+  { 38, "VOLTAGE" },
+  { 39, "CURRENT" },
   { 0, NULL }
 };
 
@@ -161,6 +163,8 @@ static const value_string internal_types[] = {
   { 10, "CHILDREN" },
   { 11, "SKETCH_NAME" },
   { 12, "SKETCH_VERSION" },
+  { 13, "REBOOT" },
+  { 14, "GATEWAY_READY" },
   { 0, NULL }
 };
 
@@ -195,6 +199,17 @@ static const value_string sensor_types[] = {
   { 0, NULL }
 };
 
+/* Stream types, used for messages of type C_STREAM */
+static const value_string stream_types[] = {
+  { 0,  "FIRMWARE_CONFIG_REQUEST" },
+  { 1,  "FIRMWARE_CONFIG_RESPONSE" },
+  { 2,  "FIRMWARE_REQUEST" },
+  { 3,  "FIRMWARE_RESPONSE" },
+  { 4,  "SOUND" },
+  { 5,  "IMAGE" },
+  { 0, NULL }
+};
+
 static const value_string ack_types[] = {
   { 0, "NoAck" },
   { 1, "Ack" },
@@ -212,6 +227,8 @@ static const gchar* typeToStr( MySensors_Command commandType, guint8 type )
       return val_to_str(type, data_types, "%d"); 
     case C_INTERNAL:
       return val_to_str(type, internal_types, "%d"); 
+    case C_STREAM:
+      return val_to_str(type, stream_types, "%d"); 
   }
   return "?";
 }
