@@ -416,5 +416,6 @@ void proto_reg_handoff_mysensors(void)
 {
   mysensors_handle = create_dissector_handle(dissect_mysensors, proto_mysensors);
   heur_dissector_add("nrf24" /*parent protocol*/, dissect_mysensors_heur, proto_mysensors);
+  heur_dissector_add("rhmesh" /*parent protocol*/, dissect_mysensors_heur, proto_mysensors);
   data_handle = find_dissector("data");
 }
