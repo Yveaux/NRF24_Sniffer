@@ -1,4 +1,4 @@
-// XGetopt.cpp  Version 1.2
+// XGetopt.cpp  Version 1.1
 //
 // Author:  Hans Dietrich
 //          hdietrich2@hotmail.com
@@ -7,9 +7,6 @@
 //     XGetopt.cpp implements getopt(), a function to parse command lines.
 //
 // History
-//     Version 1.2 - 2003 May 17
-//     - Added Unicode support
-//
 //     Version 1.1 - 2002 March 10
 //     - Added example to XGetopt.cpp module header 
 //
@@ -22,23 +19,10 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-
-///////////////////////////////////////////////////////////////////////////////
-// if you are using precompiled headers then include this line:
-#include "stdafx.h"
-///////////////////////////////////////////////////////////////////////////////
-
-
-///////////////////////////////////////////////////////////////////////////////
-// if you are not using precompiled headers then include these lines:
-//#include <windows.h>
-//#include <stdio.h>
-//#include <tchar.h>
-///////////////////////////////////////////////////////////////////////////////
-
-
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "XGetopt.h"
-
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -49,9 +33,9 @@
 //       getopt -- parse command line options
 //
 //  SYNOPSIS
-//       int getopt(int argc, TCHAR *argv[], TCHAR *optstring)
+//       int getopt(int argc, char *argv[], char *optstring)
 //
-//       extern TCHAR *optarg;
+//       extern char *optarg;
 //       extern int optind;
 //
 //  DESCRIPTION
@@ -61,9 +45,7 @@
 //       of Visual C++ programs, argc and argv are available via the
 //       variables __argc and __argv (double underscores), respectively.
 //       getopt returns the next option letter in argv that matches a
-//       letter in optstring.  (Note:  Unicode programs should use
-//       __targv instead of __argv.  Also, all character and string
-//       literals should be enclosed in _T( ) ).
+//       letter in optstring.
 //
 //       optstring is a string of recognized option letters;  if a letter
 //       is followed by a colon, the option is expected to have an argument
@@ -104,36 +86,36 @@
 //           encountered, instead of -1 as the latest standard requires.
 //
 //  EXAMPLE
-//       BOOL CMyApp::ProcessCommandLine(int argc, TCHAR *argv[])
+//       BOOL CMyApp::ProcessCommandLine(int argc, char *argv[])
 //       {
 //           int c;
 //
-//           while ((c = getopt(argc, argv, _T("aBn:"))) != EOF)
+//           while ((c = getopt(argc, argv, "aBn:")) != EOF)
 //           {
 //               switch (c)
 //               {
-//                   case _T('a'):
+//                   case 'a':
 //                       TRACE(_T("option a\n"));
 //                       //
 //                       // set some flag here
 //                       //
 //                       break;
 //
-//                   case _T('B'):
+//                   case 'B':
 //                       TRACE( _T("option B\n"));
 //                       //
 //                       // set some other flag here
 //                       //
 //                       break;
 //
-//                   case _T('n'):
+//                   case 'n':
 //                       TRACE(_T("option n: value=%d\n"), atoi(optarg));
 //                       //
 //                       // do something with value here
 //                       //
 //                       break;
 //
-//                   case _T('?'):
+//                   case '?':
 //                       TRACE(_T("ERROR: illegal option %s\n"), argv[optind-1]);
 //                       return FALSE;
 //                       break;
@@ -152,23 +134,25 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-TCHAR	*optarg;		// global argument pointer
+char	*optarg;		// global argument pointer
 int		optind = 0; 	// global argv index
 
-int getopt(int argc, TCHAR *argv[], TCHAR *optstring)
+int XGetopt(int argc, char *argv[], const char *optstring)
 {
-	static TCHAR *next = NULL;
+	char c;
+	const char *cp;
+	static char *next = NULL;
 	if (optind == 0)
 		next = NULL;
 
 	optarg = NULL;
 
-	if (next == NULL || *next == _T('\0'))
+	if (next == NULL || *next == '\0')
 	{
 		if (optind == 0)
 			optind++;
 
-		if (optind >= argc || argv[optind][0] != _T('-') || argv[optind][1] == _T('\0'))
+		if (optind >= argc || argv[optind][0] != '-' || argv[optind][1] == '\0')
 		{
 			optarg = NULL;
 			if (optind < argc)
@@ -176,7 +160,7 @@ int getopt(int argc, TCHAR *argv[], TCHAR *optstring)
 			return EOF;
 		}
 
-		if (_tcscmp(argv[optind], _T("--")) == 0)
+		if (strcmp(argv[optind], "--") == 0)
 		{
 			optind++;
 			optarg = NULL;
@@ -185,21 +169,20 @@ int getopt(int argc, TCHAR *argv[], TCHAR *optstring)
 			return EOF;
 		}
 
-		next = argv[optind];
-		next++;		// skip past -
+		next = argv[optind]+1;
 		optind++;
 	}
 
-	TCHAR c = *next++;
-	TCHAR *cp = _tcschr(optstring, c);
+	c = *next++;
+	cp = strchr(optstring, c);
 
-	if (cp == NULL || c == _T(':'))
-		return _T('?');
+	if (cp == NULL || c == ':')
+		return '?';
 
 	cp++;
-	if (*cp == _T(':'))
+	if (*cp == ':')
 	{
-		if (*next != _T('\0'))
+		if (*next != '\0')
 		{
 			optarg = next;
 			next = NULL;
@@ -211,7 +194,7 @@ int getopt(int argc, TCHAR *argv[], TCHAR *optstring)
 		}
 		else
 		{
-			return _T('?');
+			return '?';
 		}
 	}
 

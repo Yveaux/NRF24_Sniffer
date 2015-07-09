@@ -21,7 +21,6 @@
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
 
-#include "stdafx.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -123,7 +122,7 @@ static void printHex( uint8_t* p, const int len, const bool newline = true )
 
 static void printProgress( const uint32_t numCaptured, const uint32_t numLost )
 {
-  printf("\rCaptured %lu packets, Lost %lu packets", numCaptured, numLost);
+  printf("\rCaptured %u packets, Lost %u packets", numCaptured, numLost);
 }
     
 void printConfig( const serialConfig& config)
@@ -176,18 +175,18 @@ bool writeSerialConfig( HANDLE hComm, const serialConfig& config )
          && WriteFile(hComm, (LPVOID)&config, sizeof(config), &numWritten, NULL);
 }
 
-int _tmain(int argc, _TCHAR* argv[])
+int main(int argc, char* argv[])
 {
   const char* pipeName = "\\\\.\\pipe\\wireshark";     // \\.\pipe\wireshark
   uint8_t buff[1024];
-  DWORD buffIdx;
+  uint32_t buffIdx;
   uint64_t timestamp_us;
   uint32_t prevSerTimestamp_us;
   bool firstPacket;
   HANDLE hPipe = INVALID_HANDLE_VALUE;
   HANDLE hComm = INVALID_HANDLE_VALUE;
   bool printHelp = false;
-  DWORD baudrate = DEFAULT_BAUDRATE;
+  uint32_t baudrate = DEFAULT_BAUDRATE;
   int comport = DEFAULT_COMPORT;
   uint32_t numCaptured;
   uint32_t numLost;
@@ -196,11 +195,11 @@ int _tmain(int argc, _TCHAR* argv[])
 
   /* Parse commandline arguments */
   int c;
-  while (!printHelp && ((c = getopt(argc, argv, _T("b:P:c:r:l:p:a:C:m:vh"))) != EOF))
+  while (!printHelp && ((c = XGetopt(argc, argv, "b:P:c:r:l:p:a:C:m:vh")) != EOF))
   {
     switch (c)
     {
-      case _T('b'):
+      case 'b':
         printHelp = !optarg;
         if (optarg)
         {
@@ -208,7 +207,7 @@ int _tmain(int argc, _TCHAR* argv[])
           printHelp = (baudrate == 0) || (errno == ERANGE);
         }
         break;
-      case _T('P'):
+      case 'P':
         printHelp = !optarg;
         if (optarg)
         {
@@ -216,7 +215,7 @@ int _tmain(int argc, _TCHAR* argv[])
           printHelp = ((comport == 0) && (optarg[0] != '0')) || (errno == ERANGE);
         }
         break;
-      case _T('c'):
+      case 'c':
         printHelp = !optarg;
         if (optarg)
         {
@@ -225,7 +224,7 @@ int _tmain(int argc, _TCHAR* argv[])
           config.channel = (uint8_t)ch;
         }
         break;
-      case _T('r'):
+      case 'r':
         printHelp = !optarg;
         if (optarg)
         {
@@ -234,7 +233,7 @@ int _tmain(int argc, _TCHAR* argv[])
           config.rate = (uint8_t)r;
         }
         break;
-      case _T('l'):
+      case 'l':
         printHelp = !optarg;
         if (optarg)
         {
@@ -243,7 +242,7 @@ int _tmain(int argc, _TCHAR* argv[])
           config.addressLen = (uint8_t)l;
         }
         break;
-      case _T('p'):
+      case 'p':
         printHelp = !optarg;
         if (optarg)
         {
@@ -252,15 +251,15 @@ int _tmain(int argc, _TCHAR* argv[])
           config.addressPromiscLen = (uint8_t)l;
         }
         break;
-      case _T('a'):
+      case 'a':
         printHelp = !optarg;
         if (optarg)
         {
-          config.address = _strtoui64(optarg, NULL, 0); // 0 = text defines bas, e.g. prefix 0x for HEX.
+          config.address = strtoull(optarg, NULL, 0); // 0 = text defines bas, e.g. prefix 0x for HEX.
           printHelp = (config.address < 0) || (config.address > 0xFFFFFFFFFFULL) || (errno == ERANGE);
         }
         break;
-      case _T('C'):
+      case 'C':
         printHelp = !optarg;
         if (optarg)
         {
@@ -269,7 +268,7 @@ int _tmain(int argc, _TCHAR* argv[])
           config.crcLength = (uint8_t)l;
         }
         break;
-      case _T('m'):
+      case 'm':
         printHelp = !optarg;
         if (optarg)
         {
@@ -278,10 +277,10 @@ int _tmain(int argc, _TCHAR* argv[])
           config.maxPayloadSize = (uint8_t)s;
         }
         break;
-      case _T('v'):
+      case 'v':
         verbose = true;
         break;
-      case _T('h'):
+      case 'h':
         printHelp = true;
         break;
       default:
@@ -289,7 +288,13 @@ int _tmain(int argc, _TCHAR* argv[])
         break;
     }
   }
-    
+
+//http://stackoverflow.com/questions/14071713/what-is-wrong-with-printfllx
+#if OS == WINDOWS
+#define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05I64X\n", DEFAULT_RF_BASE_ADDRESS); }
+#elif OS == LINUX
+#define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05llX\n", DEFAULT_RF_BASE_ADDRESS); }
+#endif
   if (printHelp)
   {
     printf("\n");
@@ -307,7 +312,7 @@ int _tmain(int argc, _TCHAR* argv[])
     printf(" -r    Data rate, range [0..2], where 0=1Mb/s, 1=2Mb/b, 2=250Kb/s. Default -r%d\n", DEFAULT_RF_DATARATE);
     printf(" -l    Address length in bytes, range [3..5]. Default -l%d\n", DEFAULT_RF_ADDRESS_LEN);
     printf(" -p    Promiscuous address length in bytes, range [3..5]. Default -p%d\n", DEFAULT_RF_ADDRESS_PROMISC_LEN);
-    printf(" -a    Base address. Default -a0x%05llx\n", DEFAULT_RF_BASE_ADDRESS);
+    HEX64WORKAROUND
     printf(" -C    CRC length in bytes, range [0..2]. Default -C%d\n", DEFAULT_RF_CRC_LEN);
     printf(" -m    Maximum payload size in bytes, range [0..32]. Default -m%d\n", DEFAULT_RF_PAYLOAD_LEN);
     printf(" -v    Enable verbose output\n");
@@ -342,14 +347,14 @@ int _tmain(int argc, _TCHAR* argv[])
                         NULL);
     if (hPipe == INVALID_HANDLE_VALUE)
     {
-      printf("Failed to open Wireshark pipe: %d\n", GetLastError());
+      printf("Failed to open Wireshark pipe: %lu\n", GetLastError());
       goto out_pipe;
     }
 
     printf("\nConnect Wireshark to %s to continue...\n", pipeName);
     if (!ConnectNamedPipe(hPipe, NULL))
     {
-      printf("Failed to connect to Wireshark pipe: %d\n", GetLastError());
+      printf("Failed to connect to Wireshark pipe: %lu\n", GetLastError());
       goto out_pipe;
     }
 
@@ -358,7 +363,7 @@ int _tmain(int argc, _TCHAR* argv[])
     (void)WriteFile(hPipe, &pcap_hdr, sizeof(pcap_hdr), &numWritten, NULL);
 
     char portName[100];
-    _snprintf_s(portName, sizeof(portName), _TRUNCATE, "\\\\.\\COM%d", comport);   // See http://support.microsoft.com/default.aspx?scid=kb;EN-US;q115831
+    snprintf(portName, sizeof(portName), "\\\\.\\COM%d", comport);   // See http://support.microsoft.com/default.aspx?scid=kb;EN-US;q115831
     hComm = CreateFile( portName,  
                         GENERIC_READ | GENERIC_WRITE, 
                         0, 
@@ -368,7 +373,7 @@ int _tmain(int argc, _TCHAR* argv[])
                         0);
     if (hComm == INVALID_HANDLE_VALUE)
     {
-      printf("Error!\n", portName);
+      printf("Error connectin to %s !\n", portName);
       if(GetLastError() == ERROR_FILE_NOT_FOUND)
       {
         printf("Port %s not available.\n", portName);
@@ -451,7 +456,7 @@ int _tmain(int argc, _TCHAR* argv[])
       DWORD errors;
       COMSTAT stat;
       ClearCommError(hComm, &errors, &stat);
-      DWORD numToRead = max(1, min(stat.cbInQue, sizeof(buff)-buffIdx));
+      //DWORD numToRead = max(1, min(stat.cbInQue, sizeof(buff)-buffIdx));
         
       // Blocking read on serial port,reading either 1 byte when nothing is available (block),
       // the amount of data available on the port or the amount that still fits in the buffer.
@@ -464,7 +469,7 @@ int _tmain(int argc, _TCHAR* argv[])
       }
       else
       {
-        printf("\nError ReadFile %d\n", GetLastError() );
+        printf("\nError ReadFile %lu\n", GetLastError() );
       }
 
       // Loop until there are no complete packets available in the buffer
@@ -475,11 +480,11 @@ int _tmain(int argc, _TCHAR* argv[])
 //        printHex( reinterpret_cast<uint8_t*>(&buff), min(buffIdx,50) );
         uint8_t* sp = buff;
         lenAndType = *sp++;
-        DWORD lenSerPacket = GET_MSG_LEN(lenAndType);
-        DWORD lenInBuff = 1 + lenSerPacket;
+        uint32_t lenSerPacket = GET_MSG_LEN(lenAndType);
+        uint32_t lenInBuff = 1 + lenSerPacket;
         if ((lenSerPacket < SERIAL_MINIMUM_PACKET_LENGTH) || (lenSerPacket > SERIAL_MAXIMUM_PACKET_LENGTH))
         {
-          printf("\nIllegal serial packet size %d\n", lenSerPacket);
+          printf("\nIllegal serial packet size %u\n", lenSerPacket);
           if (verbose)
             printHex( buff, lenSerPacket );
           goto out;
@@ -507,7 +512,7 @@ int _tmain(int argc, _TCHAR* argv[])
                 uint8_t* pp = pcapPacket;
 
                 // PCap packet will contain everything from serial packet, except timestamp
-                DWORD lenPCapPacket = lenSerPacket - TIMESTAMP_LENGTH;
+                uint32_t lenPCapPacket = lenSerPacket - TIMESTAMP_LENGTH;
 
                 // Read timestamp (passed through pcap header)
                 uint32_t serTimestamp_us = *(reinterpret_cast<uint32_t*>(sp));
