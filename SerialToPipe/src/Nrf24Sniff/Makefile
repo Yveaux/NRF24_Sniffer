@@ -1,6 +1,7 @@
-OS = WINDOWS
+#Precompiler can only compare numbers... WINDOWS=0 LINUX=1
+OS = 1
 
-ifeq ($(OS),WINDOWS)
+ifeq ($(OS),0)
     OUTPUT = Nrf24Sniff.exe
     SRC = $(wildcard *.cpp)
 else

@@ -21,14 +21,20 @@
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
 
-#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <assert.h>
 #include <stddef.h>
 #include <errno.h>
+
+//Precompiler can only compare numbers... WINDOWS=0 LINUX=1
+#if OS == 0
+#include <windows.h>
 #include "XGetopt.h"
+#elif OS == 1
+#include <getopt.h>
+#endif
 
 #define MSG_TYPE_PACKET          (0)
 #define MSG_TYPE_CONFIG          (1)
@@ -290,9 +296,9 @@ int main(int argc, char* argv[])
   }
 
 //http://stackoverflow.com/questions/14071713/what-is-wrong-with-printfllx
-#if OS == WINDOWS
+#if OS == 0
 #define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05I64X\n", DEFAULT_RF_BASE_ADDRESS); }
-#elif OS == LINUX
+#elif OS == 1
 #define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05llX\n", DEFAULT_RF_BASE_ADDRESS); }
 #endif
   if (printHelp)
