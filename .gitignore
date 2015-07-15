@@ -31,6 +31,8 @@ Release
 *.out
 *.app
 *.exe
+# Linux executable
+SerialToPipe/src/Nrf24Sniff/Nrf24Sniff
 
 # SVN storage
 .svn
