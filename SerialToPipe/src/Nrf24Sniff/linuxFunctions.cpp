@@ -38,6 +38,10 @@ void CloseHandle (int fd)
 
 int CreateNamedPipe (const char* pipeName, int unused1, int unused2, int unused3, int unused4, int unused5, int unused6, void* unused7)
 {
+  if(access(pipeName,F_OK))
+  { //pipe already exists
+    unlink(pipeName);
+  }
   return mkfifo(pipeName, 0666);
 }
 

@@ -1,0 +1,10 @@
+To setup the build environment you need to download the wireshark source, and fix all it's dependencies first.
+Once you got that running you need to go to the plugins directory and copy the Custom.*.example files to Custom.*.
+Replace every occurence of foo with nrf24.
+To build you need to once rerun in toplevel:
+  autogen.sh
+  configure
+  make
+Once you're up and developing you just need to:
+  make
+The Binary will be put in plugins/nrf24/.libs/nrf24.so
