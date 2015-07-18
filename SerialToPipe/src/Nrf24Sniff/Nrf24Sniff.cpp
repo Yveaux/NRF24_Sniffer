@@ -425,9 +425,9 @@ int main(int argc, char* argv[])
 #endif
 
 #if OS == 0
-    char buff[300];
-    snprintf(buff, sizeof(buff), "\\\\.\\COM%s", portName);   // See http://support.microsoft.com/default.aspx?scid=kb;EN-US;q115831
-    strncpy(portName,buff,sizeof(portName));
+    char commBuff[300];
+    snprintf(commBuff, sizeof(commBuff), "\\\\.\\COM%s", portName);   // See http://support.microsoft.com/default.aspx?scid=kb;EN-US;q115831
+    strncpy(portName,commBuff,sizeof(portName));
     hComm = CreateFile( portName,  
                         GENERIC_READ | GENERIC_WRITE, 
                         0, 

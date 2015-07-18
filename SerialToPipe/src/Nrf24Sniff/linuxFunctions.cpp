@@ -22,6 +22,8 @@
  * @license GPL-3.0+ <http://spdx.org/licenses/GPL-3.0+>
  */
 
+#if OS == 1
+
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -158,3 +160,5 @@ int getSerialMaskFromInt (int baudrate)
   }
   return speedDefine;
 }
+
+#endif
