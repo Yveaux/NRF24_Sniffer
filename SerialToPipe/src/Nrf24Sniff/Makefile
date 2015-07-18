@@ -11,6 +11,7 @@ else
 endif
 
 CC=g++
+#CFLAGS:add -m32 to compile for 32bit on 64bit machine...
 #CFLAGS=inclHeaderDir=./ convertWarn2err linkStatically debugSymbols
 CFLAGS=-I. -Wall -DOS=$(OS) -static -g
 LDFLAGS=

@@ -345,7 +345,11 @@ int main(int argc, char* argv[])
 #if OS == 0
 #define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05I64X\n", DEFAULT_RF_BASE_ADDRESS); } //mingw workaround
 #elif OS == 1
-#define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05lX\n", DEFAULT_RF_BASE_ADDRESS); } //long unsigned int on linx64 == uint64_t
+#if __WORDSIZE == 64
+#define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05lX\n", DEFAULT_RF_BASE_ADDRESS); } //long unsigned int on Lin64 == uint64_t
+#else
+#define HEX64WORKAROUND { printf(" -a    Base address. Default -a0x%05llX\n", DEFAULT_RF_BASE_ADDRESS); } //long long unsigned int on Lin32 == uint64_t
+#endif
 #endif
   if (printHelp)
   {
