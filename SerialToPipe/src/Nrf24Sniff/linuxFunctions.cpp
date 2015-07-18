@@ -38,7 +38,7 @@ void CloseHandle (int fd)
 
 int CreateNamedPipe (const char* pipeName, int unused1, int unused2, int unused3, int unused4, int unused5, int unused6, void* unused7)
 {
-  if(access(pipeName,F_OK))
+  if(access(pipeName,F_OK) == 0)
   { //pipe already exists
     unlink(pipeName);
   }
@@ -57,7 +57,7 @@ int ConnectNamedPipe (const char* pipeName, void* whoCares)
 
 int GetCommState (int fd, struct termios* pTermios)
 {
-  return (tcgetattr(fd, pTermios) < 0);
+  return (tcgetattr(fd, pTermios) == 0);
 }
 
 int setRTS (int fd, int level) //http://www.linuxquestions.org/questions/programming-9/manually-controlling-rts-cts-326590/
@@ -110,7 +110,51 @@ int EscapeCommFunction (int fd, int whatToDo)
   }
 }
 
-void PurgeComm(int fd, int whatEver)
+void PurgeComm (int fd, int whatEver)
 {
   tcflush(fd, TCIOFLUSH);
+}
+
+int getSerialMaskFromInt (int baudrate)
+{
+  int speedDefine;
+  switch(baudrate)
+  {
+    case 50: speedDefine = B50; break;
+    case 75: speedDefine = B75; break;
+    case 110: speedDefine = B110; break;
+    case 134: speedDefine = B134; break;
+    case 150: speedDefine = B150; break;
+    case 200: speedDefine = B200; break;
+    case 300: speedDefine = B300; break;
+    case 600: speedDefine = B600; break;
+    case 1200: speedDefine = B1200; break;
+    case 1800: speedDefine = B1800; break;
+    case 2400: speedDefine = B2400; break;
+    case 4800: speedDefine = B4800; break;
+    case 9600: speedDefine = B9600; break;
+    case 19200: speedDefine = B19200; break;
+    case 38400: speedDefine = B38400; break;
+    case 57600: speedDefine = B57600; break;
+    case 115200: speedDefine = B115200; break;
+    case 230400: speedDefine = B230400; break;
+    case 460800: speedDefine = B460800; break;
+    case 500000: speedDefine = B500000; break;
+    case 576000: speedDefine = B576000; break;
+    case 921600: speedDefine = B921600; break;
+    case 1000000: speedDefine = B1000000; break;
+    case 1152000: speedDefine = B1152000; break;
+    case 1500000: speedDefine = B1500000; break;
+    case 2000000: speedDefine = B2000000; break;
+    case 2500000: speedDefine = B2500000; break;
+    case 3000000: speedDefine = B3000000; break;
+    case 3500000: speedDefine = B3500000; break;
+    case 4000000: speedDefine = B4000000; break;
+    default:
+      printf("Cannot set serial port speed to %d. Possible speeds are: \n", baudrate);
+      printf("50\n75\n110\n134\n150\n200\n300\n600\n1200\n1800\n2400\n4800\n9600\n19200\n38400\n57600\n115200\n230400\n460800\n500000\n576000\n921600\n1000000\n1152000\n1500000\n2000000\n2500000\n3000000\n3500000\n4000000\n");
+      return -1;
+    break;
+  }
+  return speedDefine;
 }

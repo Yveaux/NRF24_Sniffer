@@ -235,7 +235,6 @@ int main(int argc, char* argv[])
   int hPipe = INVALID_HANDLE_VALUE; //Handles are FileDescriptors (basically an integer) in unix... usually named fd_something
   int hComm = INVALID_HANDLE_VALUE; //Windows variable naming is used to change as little as possible...
   struct termios dcbSerialParams;
-  struct serial_struct ss; //Needed to set arbitrary baud rates.. http://stackoverflow.com/questions/4968529/how-to-set-baud-rate-to-307200-on-linux
 #endif
   const char* pipeName = DEFAULT_PIPENAME;
   bool printHelp = false;
@@ -505,19 +504,10 @@ int main(int argc, char* argv[])
     dcbSerialParams.c_cc[VTIME] = 0; // Inter-character timer off
     
     // Setting arbitrary communication speeds is dirty on Linux: http://stackoverflow.com/questions/4968529/how-to-set-baud-rate-to-307200-on-linux
-    ioctl(hComm, TIOCGSERIAL, &ss);
-    ss.flags &= ~ASYNC_SPD_MASK;
-    ss.flags |= ASYNC_SPD_CUST;
-    ss.custom_divisor = (ss.baud_base + (baudrate / 2)) / baudrate;
-    uint32_t closestSpeed = ss.baud_base / ss.custom_divisor;
-    if (closestSpeed < baudrate * 98 / 100 || closestSpeed > baudrate * 102 / 100)
-    {
-      printf("Cannot set serial port speed to %d. Closest possible is %d\n", baudrate, closestSpeed);
-      goto out_comm;
-    }
-    ioctl(hComm, TIOCSSERIAL, &ss);
+    // Workaround: Switch the predifined constants:
+    uint16_t serialMask = getSerialMaskFromInt(baudrate);
 
-    if(cfsetispeed(&dcbSerialParams, B38400) < 0 || cfsetospeed(&dcbSerialParams, B38400) < 0)
+    if(cfsetispeed(&dcbSerialParams, serialMask) < 0 || cfsetospeed(&dcbSerialParams, serialMask) < 0)
     {
       printf("Failed to set serial speed... ");
       goto out_comm;
@@ -543,7 +533,7 @@ int main(int argc, char* argv[])
     // Purge serial buffer
     (void)PurgeComm(hComm, PURGE_RXCLEAR | PURGE_TXCLEAR);
 
-    printf("Wait for sniffer to restart  ");
+    printf("Wait for sniffer to restart... ");
 
     // Sniffer will send configuration on startup. Wait for this packet, then
     // send our configuration and start listening for packets.
@@ -554,7 +544,7 @@ int main(int argc, char* argv[])
       goto out_comm;
     }
 
-    puts("Ok\n");
+    puts(" Ok\n");
     printConfig(config);
 
     if (!writeSerialConfig( hComm, config ))
@@ -690,7 +680,7 @@ int main(int argc, char* argv[])
                 if (    !WriteFile(hPipe, &hdr, sizeof(hdr), &numWritten, NULL) 
                      || !WriteFile(hPipe, &pcapPacket, lenPCapPacket, &numWritten, NULL))
 #elif OS == 1
-                if( !write(hPipe, &hdr, sizeof(hdr)) || !write(hPipe, &pcapPacket, sizeof(pcapPacket)))
+                if(write(hPipe, &hdr, sizeof(hdr)) == -1 || write(hPipe, &pcapPacket, lenPCapPacket) == -1)
 #endif
                 {
                   /* Restarting the pipe */
@@ -724,11 +714,6 @@ int main(int argc, char* argv[])
 out_comm:
   if ( INVALID_HANDLE_VALUE != hComm )
   {
-#if OS == 1 //Remove baudrate fix from driver: http://stackoverflow.com/questions/4968529/how-to-set-baud-rate-to-307200-on-linux
-    ioctl(hComm, TIOCGSERIAL, &ss);
-    ss.flags &= ~ASYNC_SPD_MASK;
-    ioctl(hComm, TIOCSSERIAL, &ss);
-#endif
     CloseHandle(hComm);
 #if OS == 1
     hComm = INVALID_HANDLE_VALUE;

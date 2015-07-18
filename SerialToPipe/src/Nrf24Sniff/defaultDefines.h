@@ -40,7 +40,7 @@
 #define DEFAULT_COMPORT                 "0"
 #elif OS == 1
 #define DEFAULT_PIPENAME                "/tmp/wireshark"
-#define DEFAULT_COMPORT                 "/dev/ttyUSB0"
+#define DEFAULT_COMPORT                 "/dev/ttyACM0" //Arduino Uno R3 default port
 #endif
 
 #endif	/* DEFAULTDEFINES_H */

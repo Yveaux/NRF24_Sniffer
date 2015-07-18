@@ -71,5 +71,11 @@ int EscapeCommFunction (int fd, int whatToDo);
 #define PURGE_TXCLEAR -2
 void PurgeComm(int fd, int whatEver);
 
+/**
+ * Function checks the given baudrate agains the defines from termios.h and returns the right value for the termios
+ * speed setting functions or -1 if the wanted baudrate isn't available.
+ */
+int getSerialMaskFromInt (int baudrate);
+
 #endif	/* LINUXFUNCTIONS_H */
 
