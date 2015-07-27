@@ -2,6 +2,7 @@
  * NRF24Sniff -- Nordic NRF24L01+ 2.4Ghz wireless module sniffer
  *
  * Copyright (c) 2014 by Ivo Pullens <info@emmission.nl>
+ * Ported to linux by Dietmar Malli (2015) <dietmar@malli.co.at>
  *
  * This file is part of NRF24Sniff.
  * 
