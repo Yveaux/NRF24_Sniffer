@@ -1,4 +1,4 @@
-// XGetopt.h  Version 1.2
+// XGetopt.h  Version 1.1
 //
 // Author:  Hans Dietrich
 //          hdietrich2@hotmail.com
@@ -18,8 +18,8 @@
 #define XGETOPT_H
 
 extern int optind, opterr;
-extern TCHAR *optarg;
+extern char *optarg;
 
-int getopt(int argc, TCHAR *argv[], TCHAR *optstring);
+int XGetopt(int argc, char *argv[], const char *optstring);
 
 #endif //XGETOPT_H

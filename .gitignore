@@ -18,15 +18,27 @@
 *.ipch
 *.sdf
 *.suo
+*.sln
 *.user
 *.log
 *.opensdf
+*.vcxproj
+*.vcxproj.filters
 Debug
 Release
 
 # Executables
 *.out
 *.app
+*.exe
+# Linux executable
+SerialToPipe/src/Nrf24Sniff/Nrf24Sniff
 
 # SVN storage
 .svn
+
+# Auto dependency for make
+*.d
+
+# Netbeans
+nbproject
